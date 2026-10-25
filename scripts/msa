@@ -1,0 +1,10 @@
+#!/bin/bash
+set -euo pipefail
+repo_dir="$(cd -- "$(dirname -- "$0")/.." && pwd)"
+python_bin="${MSA_PYTHON:-$HOME/.local/share/mac-studio-agents/ops-venv/bin/python}"
+if [[ ! -x "$python_bin" ]]; then
+    printf 'Run scripts/bootstrap.sh first, or set MSA_PYTHON to Python 3.12+.\n' >&2
+    exit 1
+fi
+exec "$python_bin" "$repo_dir/scripts/manage.py" "$@"
+
