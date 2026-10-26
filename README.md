@@ -155,12 +155,30 @@ scripts/msa bundle
 | `connection.json` | IP, hostname, 포트, ID, 비밀번호, LLM API 정보 |
 | `llm.env` | 개발자 PC에서 사용하는 API 환경 변수 |
 | `CONNECT.txt` | 설치 및 접속 안내 |
+| `LLM_API.txt` | SSH 없이 외부 개발자 PC에서 API를 호출하는 안내 |
+| `llm-api-connection.json` | API endpoint, 모델명, 인증 방식 및 키 파일 위치 |
+| `curl-llm.sh` | 모델 조회, 스트리밍 및 일반 응답 curl 예제 |
 
 부모 폴더에는 서버 설정과 전체 비공개 ZIP도 생성됩니다. 이 디렉터리는 비공개 저장소 또는
 접근 권한이 제한된 Drive 폴더에만 보관하고 개발자에게는 본인 파일만 전달하세요.
 `ssh_config`의 hostname은 클라이언트 별칭이며 자동으로 생성되는 공용 DNS 이름은 아닙니다.
 
 개발 컨테이너의 로그인 셸에는 `OPENAI_BASE_URL`, `OPENAI_API_KEY`, `LLM_MODEL`이 설정됩니다.
+
+외부 개발자 PC에서는 One Client에 연결한 뒤 본인의 `llm.env`와 `curl-llm.sh`를 같은
+폴더에 다운로드하고 아래 명령을 실행합니다. SSH 로그인은 필요하지 않습니다.
+
+```bash
+chmod 600 llm.env
+bash curl-llm.sh --models
+bash curl-llm.sh "한국어로 짧게 인사해줘."
+MAX_TOKENS=2048 bash curl-llm.sh "Python으로 웹 크롤러를 작성해줘."
+bash curl-llm.sh --no-stream "1+1은?"
+```
+
+`curl`과 `jq`가 필요합니다. 스크립트는 같은 폴더의 `llm.env`를 자동으로 읽으며,
+파일이 없으면 현재 셸의 환경 변수를 사용합니다. 기본 출력 상한은 512토큰이고
+스트리밍으로 표시합니다. `--no-stream`은 생성이 끝난 뒤 전체 답변을 표시합니다.
 
 ```python
 import os

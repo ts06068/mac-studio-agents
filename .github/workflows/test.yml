@@ -14,4 +14,4 @@ jobs:
           python-version: '3.12'
       - run: pip install -r gateway/requirements.txt pytest
       - run: python -m pytest -q
-      - run: bash -n scripts/bootstrap.sh scripts/download-model.sh scripts/msa scripts/check-connection.sh dev/entrypoint.sh
+      - run: for script in scripts/*.sh scripts/msa dev/entrypoint.sh; do bash -n "$script"; done

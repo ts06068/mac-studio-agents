@@ -329,6 +329,49 @@ def bundle(state):
     summary["repository"] = "https://github.com/ts06068/mac-studio-agents"
     summary["network_validation"] = "Check validation.json; host-local checks do not prove remote reachability."
     write_json(out / "server.json", summary)
+    api_help = f"""LLM API: 외부 개발자 PC에서 사용하기
+
+Base URL: {summary['api_base_url']}
+Chat Completions: {summary['api_base_url']}/chat/completions
+Models: {summary['api_base_url']}/models
+모델명: {cfg['served_model_name']}
+인증: Authorization: Bearer <사용자별 API 키>
+
+1. 개발자 PC의 Cloudflare One Client를 {cfg['cloudflare_team']} 조직에 등록하고
+   Traffic and DNS 모드로 연결하세요. 이 API는 Cloudflare 사설 주소입니다.
+2. 본인의 사용자 폴더에서 llm.env와 curl-llm.sh를 같은 로컬 폴더로 다운로드하세요.
+   macOS/Linux/Windows WSL 또는 Git Bash에서 curl 및 jq가 필요합니다.
+3. 터미널에서 해당 폴더로 이동한 뒤 실행하세요. SSH 로그인은 필요하지 않습니다.
+
+   chmod 600 llm.env
+   bash curl-llm.sh --models
+   bash curl-llm.sh "한국어로 짧게 인사해줘."
+   MAX_TOKENS=2048 bash curl-llm.sh "Python으로 간단한 웹 크롤러를 작성해줘."
+   bash curl-llm.sh --no-stream "1+1은?"
+
+기본값은 스트리밍이며 최대 출력은 512토큰입니다. MAX_TOKENS로 출력 상한을 조절합니다.
+긴 입력은 첫 출력까지 시간이 걸릴 수 있습니다. 기본 요청 timeout은 3600초입니다.
+최대 컨텍스트는 입력과 출력 합계이며 --models 결과의 max_model_len에서 현재 값을 확인합니다.
+여러 사용자가 같은 모델과 캐시 용량을 공유합니다.
+
+직접 curl로 호출하려면 같은 폴더에서:
+
+   source ./llm.env
+   curl -sS "$OPENAI_BASE_URL/chat/completions" \\
+     -H "Authorization: Bearer $OPENAI_API_KEY" \\
+     -H "Content-Type: application/json" \\
+     -d '{{"model":"{cfg['served_model_name']}","messages":[{{"role":"user","content":"안녕하세요"}}],"max_tokens":128}}' \\
+     | jq -r '.choices[0].message.content'
+
+연결 시간 초과: One Client 연결, 조직, Split Tunnels 및 접근 정책을 확인하세요.
+HTTP 401: 본인의 llm.env 및 API 키를 확인하세요.
+HTTP 429: 동시 요청 한도이므로 잠시 후 재시도하세요.
+
+개발 컨테이너 내부에서는 http://gateway:4000/v1 주소를 사용합니다.
+같은 curl-llm.sh를 복사하고 로그인 셸의 환경 변수를 사용해도 됩니다.
+llm.env에는 개인 API 키가 있으므로 본인 계정으로 보관하세요.
+"""
+    write(out / "LLM_API.txt", api_help)
     for user in cfg["users"]:
         name, port = user["name"], user["ssh_port"]
         remote_ip = cfg["cloudflare"]["allocations"][name]["ssh_ip"] if tunnel else cfg["listen_ip"]
@@ -367,6 +410,18 @@ def bundle(state):
             "OPENAI_API_KEY=" + shlex.quote(info["llm_api_key"]),
             "LLM_MODEL=" + shlex.quote(info["model"]), "",
         ]))
+        shutil.copy2(REPO / "scripts/curl-llm.sh", dest / "curl-llm.sh")
+        write(dest / "LLM_API.txt", api_help)
+        write_json(dest / "llm-api-connection.json", {
+            "username": name, "base_url": summary["api_base_url"],
+            "chat_completions_url": summary["api_base_url"] + "/chat/completions",
+            "models_url": summary["api_base_url"] + "/models",
+            "model": cfg["served_model_name"], "cloudflare_team": cfg["cloudflare_team"],
+            "authentication": "Bearer", "api_key_file": "llm.env",
+            "api_key_environment_variable": "OPENAI_API_KEY",
+            "client_requirement": "Cloudflare One Client, Traffic and DNS",
+            "example_script": "curl-llm.sh",
+        })
         write(dest / "CONNECT.txt", f"""Mac Studio development environment — {name}
 
 1. Enroll Cloudflare One Client in organization {cfg['cloudflare_team']}.
