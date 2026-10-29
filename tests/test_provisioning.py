@@ -1,5 +1,6 @@
 import importlib.util
 import ipaddress
+import json
 import sys
 from pathlib import Path
 import pytest
@@ -11,6 +12,10 @@ sys.modules["manage"] = manage
 cf_spec = importlib.util.spec_from_file_location("cloudflare", Path(__file__).resolve().parents[1] / "scripts/provision-cloudflare.py")
 cloudflare = importlib.util.module_from_spec(cf_spec)
 cf_spec.loader.exec_module(cloudflare)
+sys.modules["provision-cloudflare"] = cloudflare
+add_spec = importlib.util.spec_from_file_location("add_user", Path(__file__).resolve().parents[1] / "scripts/add_user.py")
+add_user = importlib.util.module_from_spec(add_spec)
+add_spec.loader.exec_module(add_user)
 
 
 def test_user_validation_rejects_shell_and_path_injection():
@@ -62,4 +67,62 @@ def test_tunnel_networks_and_tokens_are_scoped_to_services(tmp_path):
         assert {p["host_ip"] for p in dev["ports"]} == {"127.0.0.1"}
     assert doc["services"]["cloudflared"]["sysctls"]["net.ipv4.ip_forward"] == "0"
     assert doc["services"]["gateway"]["sysctls"]["net.ipv4.ip_forward"] == "0"
+
+
+def test_add_user_preserves_existing_workspace_and_is_retry_safe(tmp_path, monkeypatch):
+    cfg = {"users": [{"name": "alice", "ssh_port": 2221}], "api_port": 2222,
+           "backend_port": 8001, "listen_ip": "127.0.0.1", "dev_memory": "1536m",
+           "dev_cpus": 3, "dind": False, "served_model_name": "gemma-4-31b", "access_mode": "tunnel",
+           "cloudflare": {"allocations": cloudflare.allocate("10.210.0.16/29", ["alice"], []),
+                          "tunnel_id": "own-tunnel", "image": "cloudflare/cloudflared:2026.10.3"}}
+    cfg["cloudflare"]["api_ip"] = cfg["cloudflare"]["allocations"]["alice"]["api_ip"]
+    manage.write_json(tmp_path / "config.json", cfg)
+    before = manage.compose_document(tmp_path, cfg)["services"]["dev-alice"]
+    manage.write_json(tmp_path / "cloudflare-state.json", {
+        "tunnel_id": "own-tunnel", "allocations": cfg["cloudflare"]["allocations"], "route_ids": {}})
+    manage.write_json(tmp_path / "secrets/gateway.json", {
+        "users": {"alice": "existing-api-key"}, "upstream_key": "internal-key", "global_concurrency": 3})
+    manage.write(tmp_path / "secrets/users/alice/password", "existing-password")
+
+    class Client:
+        def __init__(self):
+            self.saved = [{"network": "10.210.0.0/28", "tunnel_id": "other-tunnel", "id": "occupied"}]
+            self.posts = 0
+
+        def routes(self):
+            return self.saved.copy()
+
+        def request(self, method, path, data):
+            assert (method, path) == ("POST", "/teamnet/routes")
+            self.posts += 1
+            route = {**data, "id": "new-route"}
+            self.saved.append(route)
+            return {"result": route}
+
+    def fake_keygen(command):
+        assert command[0] == "ssh-keygen"
+        key = Path(command[-1])
+        key.write_text("new-private-key")
+        Path(str(key) + ".pub").write_text("new-public-key")
+
+    monkeypatch.setattr(add_user, "run", fake_keygen)
+    client = Client()
+    first = add_user.provision_user(tmp_path, "bob", "new-password", client)
+    assert first["users"] == [{"name": "alice", "ssh_port": 2221}, {"name": "bob", "ssh_port": 2223}]
+    assert first["cloudflare"]["allocations"]["bob"]["subnet"] == "10.210.0.24/29"
+    assert first["cloudflare"]["api_ip"] == cfg["cloudflare"]["api_ip"]
+    assert manage.compose_document(tmp_path, first)["services"]["dev-alice"] == before
+    key = (tmp_path / "secrets/users/bob/api_key").read_text()
+    second = add_user.provision_user(tmp_path, "bob", "ignored-on-retry", client)
+    assert second == first and client.posts == 1
+    assert (tmp_path / "secrets/users/bob/api_key").read_text() == key
+    assert (tmp_path / "secrets/users/bob/password").read_text() == "new-password"
+    assert (tmp_path / "secrets/users/alice/password").read_text() == "existing-password"
+    gateway = json.loads((tmp_path / "secrets/gateway.json").read_text())
+    assert gateway["users"] == {"alice": "existing-api-key", "bob": key}
+    assert gateway["upstream_key"] == "internal-key" and gateway["global_concurrency"] == 3
+    assert json.loads((tmp_path / "backups/add-user-bob/config.json").read_text()) == cfg
+    client.saved[-1]["tunnel_id"] = "another-tunnel"
+    with pytest.raises(ValueError, match="belongs to another tunnel"):
+        add_user.provision_user(tmp_path, "bob", "password", client)
 

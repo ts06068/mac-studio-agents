@@ -490,6 +490,12 @@ def main():
     init.add_argument("--dev-memory", default="1536m")
     init.add_argument("--llm-venv", default="~/.venv-vllm-metal")
     init.add_argument("--with-dind", action="store_true")
+    add = sub.add_parser("add-user", help="Append a workspace while preserving existing users")
+    add.add_argument("name")
+    add.add_argument("--password-file", type=Path)
+    add.add_argument("--token-file", type=Path, default=DEFAULT_STATE.parent / "cloudflare-api-token")
+    add.add_argument("--pool", default="10.210.0.0/16")
+    add.add_argument("--apply", action="store_true")
     for cmd in ["up", "status", "down", "serve", "install-services", "autostart", "bundle"]:
         sub.add_parser(cmd)
     args = p.parse_args()
@@ -498,6 +504,9 @@ def main():
         raise SystemExit("Runtime state and credentials must be outside the public repository")
     if args.command == "init":
         initialize(args, state)
+    elif args.command == "add-user":
+        from add_user import add_user
+        add_user(args, state)
     elif args.command == "up":
         write_json(state / "compose.json", compose_document(state, config(state)))
         compose(state, "up", "-d", "--build", "--wait", "--wait-timeout", "300")

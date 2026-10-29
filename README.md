@@ -223,6 +223,24 @@ launchctl kickstart -k "gui/$(id -u)/org.mac-studio-agents.llm"
 
 ## 운영
 
+기존 사용자와 설정을 유지하며 계정을 추가하려면:
+
+```bash
+scripts/msa add-user dave --apply
+scripts/msa bundle
+```
+
+새 계정의 비밀번호를 입력하면 독립된 SSH 키·API 키·작업 볼륨을 생성합니다.
+자동화에서는 `--password-file`을 사용할 수 있습니다. Cloudflare 관리 토큰은 기본적으로
+`~/.local/share/mac-studio-agents/cloudflare-api-token`에서 읽으며 `--token-file`로 변경할 수 있습니다.
+기존 IP 및 키는 유지하고 새 사용자의 사설 경로를 추가합니다. 기존 개발 컨테이너와
+실행 중인 Tunnel에는 새 네트워크만 연결합니다. 모델이 유휴 상태가 된 뒤 API 게이트웨이를
+짧게 재시작하여 새 키를 반영합니다. LLM 서버는 재시작하지 않습니다.
+같은 사용자 이름으로 재실행하면 발급된 키와 비밀번호를 보존합니다.
+추가 전 설정은 로컬 `runtime/backups/add-user-<이름>`에 보관합니다.
+사용자가 늘어도 모델의 동시 요청 한도와 GPU 메모리 예산은 유지됩니다.
+접속 파일을 Drive에 저장할 때는 대상 폴더의 공유 권한을 확인하세요.
+
 ```bash
 scripts/msa status       # 컨테이너 상태
 scripts/msa down         # 컨테이너 정지; 볼륨 보존
